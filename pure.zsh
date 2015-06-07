@@ -61,6 +61,61 @@ prompt_pure_clear_screen() {
 	prompt_pure_preprompt_render precmd
 }
 
+#  Quick look at the working branch status.
+prompt_pure_git_status() {
+	local s='';
+	# check if we're in a git repo
+	[[ "$(command git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]] || return
+	[[ "$(command git rev-parse --is-inside-git-dir 2> /dev/null)" == "false" ]] || return
+	# Ensure the index is up to date.
+	git update-index --really-refresh -q &>/dev/null;
+
+	# Check staged but uncommited changes
+	if ! $(git diff --quiet --cached --exit-code); then
+		s+='*';
+	fi;
+
+	# Check for unstaged changes in the index.
+	if ! $(git diff --quiet --exit-code); then
+		s+='+';
+	fi;
+
+	# Check for untracked files.
+	if [ -n "$(git ls-files --others --exclude-standard)" ]; then
+		s+='?';
+	fi;
+
+	# Check for stashed files.
+	if $(git rev-parse --verify refs/stash &>/dev/null); then
+		s+='$';
+	fi;
+
+	echo ${s};
+}
+
+prompt_pure_check_git_arrows() {
+	# reset git arrows
+	prompt_pure_git_arrows=
+
+	# check if there is an upstream configured for this branch
+	command git rev-parse --abbrev-ref @'{u}' &>/dev/null || return
+
+	local arrow_status
+	# check git left and right arrow_status
+	arrow_status="$(command git rev-list --left-right --count HEAD...@'{u}' 2>/dev/null)"
+	# exit if the command failed
+	(( !$? )) || return
+
+	# left and right are tab-separated, split on tab and store as array
+	arrow_status=(${(ps:\t:)arrow_status})
+	local arrows left=${arrow_status[1]} right=${arrow_status[2]}
+
+	(( ${right:-0} > 0 )) && arrows+="%F{red}${PURE_GIT_DOWN_ARROW:-⇣}"
+	(( ${left:-0} > 0 )) && arrows+="%F{green}${PURE_GIT_UP_ARROW:-⇡}"
+
+	[[ -n $arrows ]] && prompt_pure_git_arrows=" ${arrows}"
+}
+
 prompt_pure_set_title() {
 	# emacs terminal does not support settings the title
 	(( ${+EMACS} )) && return
@@ -119,16 +174,17 @@ prompt_pure_preprompt_render() {
 	local git_color=242
 	[[ -n ${prompt_pure_git_last_dirty_check_timestamp+x} ]] && git_color=red
 
-	# construct preprompt, beginning with path
-	local preprompt="%F{blue}%~%f"
-	# git info
-	preprompt+="%F{$git_color}${vcs_info_msg_0_}${prompt_pure_git_dirty}%f"
-	# git pull/push arrows
-	preprompt+="%F{cyan}${prompt_pure_git_arrows}%f"
+	# construct preprompt
 	# username and machine if applicable
-	preprompt+=$prompt_pure_username
+	local preprompt=$prompt_pure_username
+	#path
+	preprompt+="%B%F{magenta}%~%f"
+	# git info
+	preprompt+="%b%F{cyan}${vcs_info_msg_0_}`prompt_pure_git_status`%f"
+	# git pull/push arrows
+	preprompt+="${prompt_pure_git_arrows}%f"
 	# execution time
-	preprompt+="%F{yellow}${prompt_pure_cmd_exec_time}%f"
+	preprompt+="%b%F{yellow}${prompt_pure_cmd_exec_time}%f"
 
 	# make sure prompt_pure_last_preprompt is a global array
 	typeset -g -a prompt_pure_last_preprompt
@@ -426,13 +482,13 @@ prompt_pure_setup() {
 	fi
 
 	# show username@host if logged in through SSH
-	[[ "$SSH_CONNECTION" != '' ]] && prompt_pure_username=' %F{242}%n@%m%f'
+	[[ "$SSH_CONNECTION" != '' ]] && prompt_pure_username='%F{yellow}%n%F{white} at %F{red}%m%f '
 
 	# show username@host if root, with username in white
-	[[ $UID -eq 0 ]] && prompt_pure_username=' %F{white}%n%f%F{242}@%m%f'
+	[[ $UID -eq 0 ]] && prompt_pure_username='%F{yellow}%n%F{white} at %F{red}%m%f '
 
 	# prompt turns red if the previous command didn't exit with 0
-	PROMPT='%(?.%F{magenta}.%F{red})${PURE_PROMPT_SYMBOL:-❯}%f '
+	PROMPT="!%{%B%F{cyan}%}%!%{%f%k%b%} %(?.%F{magenta}.%F{red})${PURE_PROMPT_SYMBOL:-❯}%f "
 }
 
 prompt_pure_setup "$@"
